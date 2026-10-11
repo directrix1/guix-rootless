@@ -15,7 +15,7 @@ The installer detects the host architecture, downloads the appropriate official 
 | `ppc64le`, `powerpc64le` | `powerpc64le` |
 | `riscv64` | `riscv64` |
 
-On an `x86_64` kernel with a 32-bit userspace, the installer selects `i686` when `getconf LONG_BIT` reports 32. All six Guix 1.5.0 archive URLs and their SHA-256 hashes are pinned to the GNU release. **Architecture support does not mean every package has a prebuilt substitute on every architecture.**
+On an `x86_64` kernel with a 32-bit userspace, the installer selects `i686` when `getconf LONG_BIT` reports 32. All six Guix 1.5.0 archive filenames and their SHA-256 hashes are pinned in [`src/guix-releases.txt`](src/guix-releases.txt) against the GNU release. **Architecture support does not mean every package has a prebuilt substitute on every architecture.**
 
 ## Requirements
 
@@ -107,8 +107,9 @@ src/
 ├── autostart/                       # XDG autostart entries; installed via template rendering
 │   ├── guix-desktop-sync.desktop
 │   └── guix-daemon.desktop
-└── systemd/
-    └── guix-daemon.service          # installed as the systemd user unit
+├── systemd/
+│   └── guix-daemon.service          # installed as the systemd user unit
+└── guix-releases.txt                # pinned archive filenames and SHA-256 checksums per architecture
 ```
 
 The `bin/` scripts and the systemd unit are copied verbatim. The two `.desktop` templates contain an `@BIN_DIR@` placeholder that the installer replaces with the actual absolute `~/.local/bin` path when writing the installed file.
@@ -222,7 +223,7 @@ guix-env /bin/bash -c '
 
 ## Security and design notes
 
-- The archive is **SHA-256 checked** against hashes copied from the official Guix 1.5.0 release announcement. This does **not** perform a separate GPG signature verification; for stricter supply-chain assurance, independently verify the corresponding `.sig` file using the Guix release-signing key and a trusted key fingerprint before installing.
+- The archive is **SHA-256 checked** against the hashes in `src/guix-releases.txt`, copied from the official Guix 1.5.0 release announcement. This does **not** perform a separate GPG signature verification; for stricter supply-chain assurance, independently verify the corresponding `.sig` file using the Guix release-signing key and a trusted key fingerprint before installing.
 - The normal wrapper makes `/gnu/store` and `/var/guix` visible only within Bubblewrap. It shares the network and **your home directory**. The GUI wrapper additionally shares `/tmp`, runtime sockets (Wayland, X11, PulseAudio/PipeWire, D-Bus) and GPU devices. **It is not a security sandbox for untrusted applications.**
 - Rootless Guix builds require usable unprivileged namespaces. The installer deliberately does not force `--disable-chroot`.
 - `~/.local/share/guix` holds persistent Guix store/state; helper scripts, your user profile, shell configuration, XDG desktop launchers and the user service must live in their conventional home-directory locations.

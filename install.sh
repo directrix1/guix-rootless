@@ -3,7 +3,6 @@
 # Linux only. Intended for single-user systems such as the Steam Frame desktop.
 set -Eeuo pipefail
 
-VERSION=1.5.0
 BASE_URL=https://ftp.gnu.org/gnu/guix
 PREFIX="${HOME}/.local/share/guix"
 BIN_DIR="${HOME}/.local/bin"
@@ -294,10 +293,10 @@ if (( UNINSTALL )); then uninstall_guix; exit 0; fi
 # the src/ tree beside this script, so they can be read and reviewed directly.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
 SRC_DIR="$SCRIPT_DIR/src"
-for template in bin/guix-env bin/guix-gui bin/guix-daemon-launch \
+for required in bin/guix-env bin/guix-gui bin/guix-daemon-launch \
                 bin/guix-desktop-sync bin/guix-pkg autostart/guix-desktop-sync.desktop \
-                autostart/guix-daemon.desktop systemd/guix-daemon.service; do
-  [[ -f "$SRC_DIR/$template" ]] || die "Missing src/$template beside install.sh; re-extract the full archive."
+                autostart/guix-daemon.desktop systemd/guix-daemon.service guix-releases.txt; do
+  [[ -f "$SRC_DIR/$required" ]] || die "Missing src/$required beside install.sh; re-extract the full archive."
 done
 
 for cmd in bash bwrap tar sha256sum uname id mkdir chmod install awk find grep sed cp mv rm sleep; do
@@ -324,19 +323,16 @@ case "$ARCH" in
   *) die "Unsupported architecture: '$ARCH'. See --help." ;;
 esac
 
-# SHA-256 values from GNU's Guix 1.5.0 release announcement, Jan 23, 2026.
-# https://lists.gnu.org/archive/html/info-gnu/2026-01/msg00004.html
-case "$ARCH" in
-  x86_64)      SHA256=aa41025489c5061543e9c48873eaa829b900b2da75d40f9648913622f5f47817 ;;
-  i686)        SHA256=e2aae143a826e218b9724a3e416b3688ff753b11fb63283164010b9802b4b1a4 ;;
-  armhf)       SHA256=e92ddecf4476ce1e41b85e4eb1c8fd9a4756d77c817c1fd986ab24253612b0fa ;;
-  aarch64)     SHA256=a5d58b1d0294cad6adb1f2aff627d37feb5db763fdffbceb8551f2b12123cf39 ;;
-  powerpc64le) SHA256=105a395eeffab32e9e0edb46765b1a2728138c729227bd53f05019097a3e837d ;;
-  riscv64)     SHA256=3112abc99c9b0fcd122a6a0f4daa076dd4daf2db366b3f0a675cbe396fa1ae0d ;;
-esac
-
-FILE="guix-binary-${VERSION}.${ARCH}-linux.tar.xz"
-info "Architecture: $ARCH; Guix: $VERSION"
+# The official archive filenames and SHA-256 values from GNU's Guix 1.5.0
+# release announcement (Jan 23, 2026) are data, not code, and live in
+# src/guix-releases.txt for direct human verification.
+release=$(awk -v arch="$ARCH" '$1 == arch { print $2 " " $3; exit }' "$SRC_DIR/guix-releases.txt")
+[[ -n $release ]] || die "No pinned Guix archive for architecture '$ARCH' in src/guix-releases.txt."
+FILE=${release%% *}
+SHA256=${release#* }
+[[ $FILE == guix-binary-1.5.0.*-linux.tar.xz ]] || die "Unexpected archive filename in src/guix-releases.txt: $FILE"
+[[ $SHA256 =~ ^[0-9a-f]{64}$ ]] || die "Invalid SHA-256 for '$ARCH' in src/guix-releases.txt: $SHA256"
+info "Architecture: $ARCH; Guix archive: $FILE"
 info "Install location: $PREFIX"
 
 # Fail early on hosts that cannot launch a rootless bwrap namespace.
