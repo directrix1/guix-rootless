@@ -1,6 +1,6 @@
-# Rootless GNU Guix 1.5.0 with Bubblewrap
+# Rootless GNU Guix with Bubblewrap
 
-Install **GNU Guix 1.5.0** as a normal Linux user without putting `/gnu/store` or `/var/guix` on the host filesystem. Originally developed on the **Steam Frame KDE desktop**, but intended for other Linux systems that support rootless Bubblewrap and unprivileged user namespaces.
+Install **GNU Guix** as a normal Linux user without putting `/gnu/store` or `/var/guix` on the host filesystem. Originally developed on the **Steam Frame KDE desktop**, but intended for other Linux systems that support rootless Bubblewrap and unprivileged user namespaces. The supported GNU Guix release is pinned in the [`GUIX_VERSION`](GUIX_VERSION) file beside the installer; `--help` and the installer report it from there.
 
 The installer detects the host architecture, downloads the appropriate official Guix archive, verifies its SHA-256 checksum, creates the isolated filesystem layout, starts a rootless daemon, authorizes official binary substitutes, and sets up XDG-compatible GUI launchers and desktop integration.
 
@@ -15,7 +15,7 @@ The installer detects the host architecture, downloads the appropriate official 
 | `ppc64le`, `powerpc64le` | `powerpc64le` |
 | `riscv64` | `riscv64` |
 
-On an `x86_64` kernel with a 32-bit userspace, the installer selects `i686` when `getconf LONG_BIT` reports 32. All six Guix 1.5.0 archive filenames and their SHA-256 hashes are pinned in [`src/guix-releases.txt`](src/guix-releases.txt) against the GNU release. **Architecture support does not mean every package has a prebuilt substitute on every architecture.**
+On an `x86_64` kernel with a 32-bit userspace, the installer selects `i686` when `getconf LONG_BIT` reports 32. All six archive filenames for the supported release and their SHA-256 hashes are pinned in [`src/guix-releases.txt`](src/guix-releases.txt) against the GNU release announcement, and must agree with `GUIX_VERSION`. **Architecture support does not mean every package has a prebuilt substitute on every architecture.**
 
 ## Requirements
 
@@ -45,7 +45,7 @@ bash install.sh --help
 bash install.sh --no-examples          # infrastructure only
 bash install.sh --with-geany           # also install GTK editor Geany
 bash install.sh --arch aarch64         # manually select the archive
-bash install.sh --archive ~/Downloads/guix-binary-1.5.0.aarch64-linux.tar.xz
+bash install.sh --archive ~/Downloads/guix-binary-<version>.aarch64-linux.tar.xz
 bash install.sh --reuse                # regenerate helpers using an existing installation
 ```
 
@@ -94,9 +94,11 @@ If the uninstaller reports it cannot disable the daemon service, run it from a s
 
 ## What is installed
 
-Everything the installer generates comes from plain, reviewable files in the repository's `src/` tree — the installer no longer embeds scripts in heredocs:
+Everything the installer needs comes from plain, reviewable files — the installer no longer embeds scripts, version numbers or release checksums:
 
 ```text
+GUIX_VERSION                         # the supported GNU Guix release, reported by --help
+install.sh                           # the installer and uninstaller
 src/
 ├── bin/                             # copied as-is into ~/.local/bin (mode 755)
 │   ├── guix-env                     # Bubblewrap namespace wrapper
@@ -112,7 +114,7 @@ src/
 └── guix-releases.txt                # pinned archive filenames and SHA-256 checksums per architecture
 ```
 
-The `bin/` scripts and the systemd unit are copied verbatim. The two `.desktop` templates contain an `@BIN_DIR@` placeholder that the installer replaces with the actual absolute `~/.local/bin` path when writing the installed file.
+The `bin/` scripts and the systemd unit are copied verbatim. The two `.desktop` templates contain an `@BIN_DIR@` placeholder that the installer replaces with the actual absolute `~/.local/bin` path when writing the installed file. Adopting a newer Guix release means updating `GUIX_VERSION` together with `src/guix-releases.txt`; the installer refuses to run when the two disagree.
 
 Persistent package store and daemon state:
 
@@ -223,7 +225,7 @@ guix-env /bin/bash -c '
 
 ## Security and design notes
 
-- The archive is **SHA-256 checked** against the hashes in `src/guix-releases.txt`, copied from the official Guix 1.5.0 release announcement. This does **not** perform a separate GPG signature verification; for stricter supply-chain assurance, independently verify the corresponding `.sig` file using the Guix release-signing key and a trusted key fingerprint before installing.
+- The archive is **SHA-256 checked** against the hashes in `src/guix-releases.txt`, copied from the official release announcement for the pinned Guix version. This does **not** perform a separate GPG signature verification; for stricter supply-chain assurance, independently verify the corresponding `.sig` file using the Guix release-signing key and a trusted key fingerprint before installing.
 - The normal wrapper makes `/gnu/store` and `/var/guix` visible only within Bubblewrap. It shares the network and **your home directory**. The GUI wrapper additionally shares `/tmp`, runtime sockets (Wayland, X11, PulseAudio/PipeWire, D-Bus) and GPU devices. **It is not a security sandbox for untrusted applications.**
 - Rootless Guix builds require usable unprivileged namespaces. The installer deliberately does not force `--disable-chroot`.
 - `~/.local/share/guix` holds persistent Guix store/state; helper scripts, your user profile, shell configuration, XDG desktop launchers and the user service must live in their conventional home-directory locations.
@@ -231,7 +233,7 @@ guix-env /bin/bash -c '
 
 ## Primary references
 
-- [GNU Guix 1.5.0 release announcement and archive hashes](https://lists.gnu.org/archive/html/info-gnu/2026-01/msg00004.html)
+- [Release announcement and archive hashes for the pinned Guix version](https://lists.gnu.org/archive/html/info-gnu/2026-01/msg00004.html)
 - [Official Guix archive directory](https://ftp.gnu.org/gnu/guix/)
 - [Guix manual](https://guix.gnu.org/manual/en/)
 - [Rootless Guix daemon design](https://hpc.guix.info/blog/2025/03/build-daemon-drops-its-privileges/)

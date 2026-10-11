@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# GNU Guix 1.5.0, installed without root inside a Bubblewrap mount namespace.
+# GNU Guix (release pinned in GUIX_VERSION), installed without root inside
+# a Bubblewrap mount namespace.
 # Linux only. Intended for single-user systems such as the Steam Frame desktop.
 set -Eeuo pipefail
 
@@ -35,11 +36,28 @@ render_template() {
   done < "$src" > "$dest"
 }
 
+# The installed helpers, service unit and desktop entries are plain files in
+# the src/ tree beside this script, so they can be read and reviewed directly.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+SRC_DIR="$SCRIPT_DIR/src"
+
+# The GNU Guix release this installer supports is pinned in the GUIX_VERSION
+# file beside this script; --help and the installer report it from there.
+read_guix_version() {
+  local v
+  [[ -f "$SCRIPT_DIR/GUIX_VERSION" ]] || die 'Missing GUIX_VERSION file beside install.sh; re-extract the full archive.'
+  v=$(< "$SCRIPT_DIR/GUIX_VERSION")
+  [[ $v =~ ^[0-9]+(\.[0-9]+)+$ ]] || die "Unexpected version in GUIX_VERSION: $v"
+  printf '%s\n' "$v"
+}
+
 usage() {
-  cat <<'USAGE'
+  local version
+  version=$(read_guix_version 2>/dev/null) || version='<unknown: missing GUIX_VERSION file>'
+  cat <<USAGE
 Usage: bash install.sh [OPTIONS]
 
-Install GNU Guix 1.5.0 rootlessly under ~/.local/share/guix.
+Install GNU Guix $version rootlessly under ~/.local/share/guix.
 
 Options:
   --arch ARCH       Override architecture detection (x86_64, i686, armhf,
@@ -291,13 +309,12 @@ if (( UNINSTALL )); then uninstall_guix; exit 0; fi
 
 # The installed helpers, service unit and desktop entries are plain files in
 # the src/ tree beside this script, so they can be read and reviewed directly.
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
-SRC_DIR="$SCRIPT_DIR/src"
 for required in bin/guix-env bin/guix-gui bin/guix-daemon-launch \
                 bin/guix-desktop-sync bin/guix-pkg autostart/guix-desktop-sync.desktop \
                 autostart/guix-daemon.desktop systemd/guix-daemon.service guix-releases.txt; do
   [[ -f "$SRC_DIR/$required" ]] || die "Missing src/$required beside install.sh; re-extract the full archive."
 done
+GUIX_VERSION=$(read_guix_version)
 
 for cmd in bash bwrap tar sha256sum uname id mkdir chmod install awk find grep sed cp mv rm sleep; do
   command -v "$cmd" >/dev/null 2>&1 || die "Missing host command: $cmd"
@@ -323,16 +340,16 @@ case "$ARCH" in
   *) die "Unsupported architecture: '$ARCH'. See --help." ;;
 esac
 
-# The official archive filenames and SHA-256 values from GNU's Guix 1.5.0
-# release announcement (Jan 23, 2026) are data, not code, and live in
-# src/guix-releases.txt for direct human verification.
+# The official archive filenames and SHA-256 values for the supported
+# release are data, not code, and live in src/guix-releases.txt for direct
+# human verification.
 release=$(awk -v arch="$ARCH" '$1 == arch { print $2 " " $3; exit }' "$SRC_DIR/guix-releases.txt")
 [[ -n $release ]] || die "No pinned Guix archive for architecture '$ARCH' in src/guix-releases.txt."
 FILE=${release%% *}
 SHA256=${release#* }
-[[ $FILE == guix-binary-1.5.0.*-linux.tar.xz ]] || die "Unexpected archive filename in src/guix-releases.txt: $FILE"
+[[ $FILE == guix-binary-${GUIX_VERSION}.*-linux.tar.xz ]] || die "Archive filename in src/guix-releases.txt does not match GUIX_VERSION ($GUIX_VERSION): $FILE"
 [[ $SHA256 =~ ^[0-9a-f]{64}$ ]] || die "Invalid SHA-256 for '$ARCH' in src/guix-releases.txt: $SHA256"
-info "Architecture: $ARCH; Guix archive: $FILE"
+info "Architecture: $ARCH; GNU Guix: $GUIX_VERSION ($FILE)"
 info "Install location: $PREFIX"
 
 # Fail early on hosts that cannot launch a rootless bwrap namespace.
@@ -486,6 +503,7 @@ info 'Synchronizing XDG desktop entries'
 
 info 'INSTALLATION COMPLETE'
 cat <<EOF
+Guix release:    $GUIX_VERSION
 Guix data:       $PREFIX
 Wrapper:         $BIN_DIR/guix-env
 GUI wrapper:     $BIN_DIR/guix-gui
