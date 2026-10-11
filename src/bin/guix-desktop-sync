@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${GUIX_DESKTOP_SYNC_INSIDE:-}" != 1 ]]; then
+  GUIX_DESKTOP_SYNC_INSIDE=1 "$HOME/.local/bin/guix-env.sh" \
+    /bin/bash "$HOME/.local/bin/guix-desktop-sync"
+  exit 0
+fi
+
+PROFILE="$HOME/.guix-profile"
+SOURCE="$PROFILE/share/applications"
+DEST="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+ICONS="$HOME/.local/share/guix/desktop-icons"
+WRAPPER="$HOME/.local/bin/guix-gui.sh"
+mkdir -p "$DEST" "$ICONS"
+declare -A seen=()
+count=0
+
+if [[ -d "$SOURCE" ]]; then
+  while IFS= read -r -d '' desktop; do
+    rel="${desktop#"$SOURCE"/}"
+    dest="$DEST/guix-bwrap-${rel//\//-}"
+    seen["$dest"]=1
+
+    icon=$(awk '
+      /^\[Desktop Entry\]$/ { main=1; next }
+      /^\[/ { main=0 }
+      main && /^Icon=/ { sub(/^Icon=/, ""); print; exit }
+    ' "$desktop")
+    copied=''
+    if [[ -n "$icon" ]]; then
+      candidate=''
+      if [[ "$icon" == /* && -f "$icon" ]]; then
+        candidate="$icon"
+      elif [[ -d "$PROFILE/share/icons" ]]; then
+        candidate=$(find -L "$PROFILE/share/icons" -type f \
+          \( -name "$icon" -o -name "$icon.svg" -o -name "$icon.png" -o -name "$icon.xpm" \) \
+          -print -quit 2>/dev/null || true)
+      fi
+      if [[ -n "$candidate" ]]; then
+        case "$candidate" in
+          *.svg|*.png|*.xpm)
+            copied="$ICONS/${rel//\//-}.${candidate##*.}"
+            cp -L -f "$candidate" "$copied"
+            ;;
+        esac
+      fi
+    fi
+
+    # Prefix every Exec= (including Desktop Actions) and remove host-side
+    # TryExec checks. The original argument/field codes are retained.
+    awk -v wrapper="$WRAPPER" -v icon="$copied" '
+      /^\[Desktop Entry\]$/ { section="main"; print; print "X-Guix-Bwrap-Generated=true"; next }
+      /^\[/ { section="other" }
+      /^TryExec=/ { next }
+      /^Path=/ && section=="main" { next }
+      /^DBusActivatable=/ && section=="main" { print "DBusActivatable=false"; next }
+      /^Exec=/ { print "Exec=\"" wrapper "\" " substr($0,6); next }
+      /^Icon=/ && section=="main" && icon!="" { print "Icon=" icon; next }
+      { print }
+    ' "$desktop" > "$dest"
+    count=$((count+1))
+  done < <(find -L "$SOURCE" -type f -name '*.desktop' -print0)
+fi
+
+for stale in "$DEST"/guix-bwrap-*.desktop; do
+  [[ -f "$stale" ]] || continue
+  if [[ -z "${seen[$stale]+yes}" ]] && grep -qx 'X-Guix-Bwrap-Generated=true' "$stale"; then
+    rm -- "$stale"
+  fi
+done
+
+# Guix's xterm package supplies no .desktop file, so create one explicitly.
+if [[ -x "$PROFILE/bin/xterm" ]]; then
+  cat > "$DEST/guix-xterm.desktop" <<XTERM
+[Desktop Entry]
+Type=Application
+Name=XTerm (Guix)
+Comment=Terminal from GNU Guix
+Exec="$WRAPPER" xterm
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+X-Guix-Bwrap-Generated=true
+XTERM
+elif [[ -f "$DEST/guix-xterm.desktop" ]] &&
+     grep -qx 'X-Guix-Bwrap-Generated=true' "$DEST/guix-xterm.desktop"; then
+  rm -- "$DEST/guix-xterm.desktop"
+fi
+
+echo "Synchronized $count Guix-provided desktop launcher(s)."

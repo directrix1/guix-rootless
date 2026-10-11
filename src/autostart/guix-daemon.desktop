@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Guix Daemon (Rootless)
+Exec="@BIN_DIR@/guix-daemon-launch"
+Terminal=false
+NoDisplay=true

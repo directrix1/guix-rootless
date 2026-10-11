@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Guix Desktop Launcher Sync
+Exec="@BIN_DIR@/guix-desktop-sync"
+Terminal=false
+NoDisplay=true

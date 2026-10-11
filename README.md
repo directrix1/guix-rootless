@@ -30,7 +30,7 @@ No `sudo` is used. This is **not** a replacement for the upstream system-wide Gu
 
 ## Install
 
-Extract the ZIP and, as your regular user, run:
+Extract the ZIP and, as your regular user, run it **from inside the extracted directory** (the `src/` tree must stay next to `install.sh`):
 
 ```bash
 bash install.sh
@@ -93,6 +93,25 @@ The installer records its resolved XDG directories in `~/.local/share/guix/.guix
 If the uninstaller reports it cannot disable the daemon service, run it from a session with access to the systemd user bus, or first disable/stop `guix-daemon.service` using the Steam Frame user-bus instructions below. Do not delete the store while the daemon is running.
 
 ## What is installed
+
+Everything the installer generates comes from plain, reviewable files in the repository's `src/` tree — the installer no longer embeds scripts in heredocs:
+
+```text
+src/
+├── bin/                             # copied as-is into ~/.local/bin (mode 755)
+│   ├── guix-env.sh                  # Bubblewrap namespace wrapper
+│   ├── guix-gui.sh                  # GUI wrapper sharing the desktop session
+│   ├── guix-daemon-launch           # daemon fallback without user systemd
+│   ├── guix-desktop-sync            # XDG launcher synchronization
+│   └── guix-pkg                     # package helper + launcher resync
+├── autostart/                       # XDG autostart entries; installed via template rendering
+│   ├── guix-desktop-sync.desktop
+│   └── guix-daemon.desktop
+└── systemd/
+    └── guix-daemon.service          # installed as the systemd user unit
+```
+
+The `bin/` scripts and the systemd unit are copied verbatim. The two `.desktop` templates contain an `@BIN_DIR@` placeholder that the installer replaces with the actual absolute `~/.local/bin` path when writing the installed file.
 
 Persistent package store and daemon state:
 

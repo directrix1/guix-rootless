@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PREFIX="$HOME/.local/share/guix"
+PROFILE="$HOME/.guix-profile"
+BOOTSTRAP=/var/guix/profiles/per-user/root/current-guix/bin
+GUI=0
+if [[ "${1:-}" == --gui ]]; then GUI=1; shift; fi
+(($#)) || { echo 'Usage: guix-env.sh [--gui] COMMAND [ARG...]' >&2; exit 2; }
+
+args=(
+  --share-net
+  --dir /gnu
+  --bind "$PREFIX/gnu/store" /gnu/store
+  --dir /var
+  --bind "$PREFIX/var/guix" /var/guix
+  --symlink usr/bin /bin
+  --symlink usr/lib /lib
+  --symlink usr/lib64 /lib64
+  --symlink usr/sbin /sbin
+  --ro-bind /usr /usr
+  --ro-bind /etc /etc
+  --ro-bind /run /run
+  --dev /dev
+  --proc /proc
+  --tmpfs /tmp
+  --bind "$HOME" "$HOME"
+  --setenv GUIX_CONFIGURATION_DIRECTORY "$PREFIX/etc/guix"
+  --setenv GUIX_STATE_DIRECTORY /var/guix
+  --setenv GUIX_DAEMON_SOCKET /var/guix/daemon-socket/socket
+  --setenv GUIX_PROFILE "$PROFILE"
+  --setenv PATH "$PROFILE/bin:$HOME/.config/guix/current/bin:$BOOTSTRAP:${PATH:-/usr/bin:/bin}"
+)
+
+if (( GUI )); then
+  # Deliberately shares display/audio/DBus sockets and /tmp with the desktop.
+  # This is NOT intended to isolate untrusted GUI applications.
+  args+=(--ro-bind-try /sys /sys --dev-bind-try /dev/dri /dev/dri --bind /tmp /tmp)
+  if [[ -n "${XDG_RUNTIME_DIR:-}" && -d "$XDG_RUNTIME_DIR" ]]; then
+    args+=(--bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR")
+  fi
+  args+=(--setenv XDG_DATA_DIRS "$PROFILE/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}")
+fi
+
+exec bwrap "${args[@]}" -- "$@"

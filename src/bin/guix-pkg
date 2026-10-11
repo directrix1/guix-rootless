@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+(($#)) || { echo 'Usage: guix-pkg SUBCOMMAND [ARG...]' >&2; exit 2; }
+"$HOME/.local/bin/guix-env.sh" guix "$@"
+case "$1" in
+  install|remove|upgrade) "$HOME/.local/bin/guix-desktop-sync" ;;
+esac

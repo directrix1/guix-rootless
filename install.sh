@@ -19,6 +19,23 @@ info() { printf '\n[guix-bwrap] %s\n' "$*"; }
 warn() { printf '\n[guix-bwrap] WARNING: %s\n' "$*" >&2; }
 die()  { printf '\n[guix-bwrap] ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Copy a template from src/ to its installed location, replacing each
+# @NAME@ placeholder with the current value of the shell variable NAME.
+# The src/ files stay static and browsable; only the install target varies.
+render_template() {
+  local src=$1 dest=$2
+  local line name value
+  while IFS= read -r line || [[ -n $line ]]; do
+    while [[ $line =~ @([A-Z_]+)@ ]]; do
+      name=${BASH_REMATCH[1]}
+      [[ -n ${!name+set} ]] || die "Template $src uses undefined variable $name"
+      value=${!name}
+      line=${line/"${BASH_REMATCH[0]}"/"$value"}
+    done
+    printf '%s\n' "$line"
+  done < "$src" > "$dest"
+}
+
 usage() {
   cat <<'USAGE'
 Usage: bash install.sh [OPTIONS]
@@ -40,6 +57,9 @@ Options:
 Requirements: Linux, bash, bubblewrap (bwrap), tar/xz, sha256sum,
               curl or wget, enough free disk space, and usable user namespaces.
 No sudo, root access, or changes to /gnu or /var on the host.
+
+The 'src/' directory must stay next to this script: the installer copies
+its helper scripts, service unit and desktop entries from there.
 USAGE
 }
 
@@ -262,6 +282,16 @@ uninstall_guix() {
 if (( ASSUME_YES && ! UNINSTALL )); then die '--yes is only valid with --uninstall'; fi
 if (( UNINSTALL )); then uninstall_guix; exit 0; fi
 
+# The installed helpers, service unit and desktop entries are plain files in
+# the src/ tree beside this script, so they can be read and reviewed directly.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+SRC_DIR="$SCRIPT_DIR/src"
+for template in bin/guix-env.sh bin/guix-gui.sh bin/guix-daemon-launch \
+                bin/guix-desktop-sync bin/guix-pkg autostart/guix-desktop-sync.desktop \
+                autostart/guix-daemon.desktop systemd/guix-daemon.service; do
+  [[ -f "$SRC_DIR/$template" ]] || die "Missing src/$template beside install.sh; re-extract the full archive."
+done
+
 for cmd in bash bwrap tar sha256sum uname id mkdir chmod install awk find grep sed cp mv rm sleep; do
   command -v "$cmd" >/dev/null 2>&1 || die "Missing host command: $cmd"
 done
@@ -349,187 +379,17 @@ XDG_CACHE_HOME=${XDG_CACHE_HOME:-$HOME/.cache}
 EOF
 
 info 'Creating Bubblewrap command wrappers'
-cat > "$BIN_DIR/guix-env.sh" <<'ENV_SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-PREFIX="$HOME/.local/share/guix"
-PROFILE="$HOME/.guix-profile"
-BOOTSTRAP=/var/guix/profiles/per-user/root/current-guix/bin
-GUI=0
-if [[ "${1:-}" == --gui ]]; then GUI=1; shift; fi
-(($#)) || { echo 'Usage: guix-env.sh [--gui] COMMAND [ARG...]' >&2; exit 2; }
-
-args=(
-  --share-net
-  --dir /gnu
-  --bind "$PREFIX/gnu/store" /gnu/store
-  --dir /var
-  --bind "$PREFIX/var/guix" /var/guix
-  --symlink usr/bin /bin
-  --symlink usr/lib /lib
-  --symlink usr/lib64 /lib64
-  --symlink usr/sbin /sbin
-  --ro-bind /usr /usr
-  --ro-bind /etc /etc
-  --ro-bind /run /run
-  --dev /dev
-  --proc /proc
-  --tmpfs /tmp
-  --bind "$HOME" "$HOME"
-  --setenv GUIX_CONFIGURATION_DIRECTORY "$PREFIX/etc/guix"
-  --setenv GUIX_STATE_DIRECTORY /var/guix
-  --setenv GUIX_DAEMON_SOCKET /var/guix/daemon-socket/socket
-  --setenv GUIX_PROFILE "$PROFILE"
-  --setenv PATH "$PROFILE/bin:$HOME/.config/guix/current/bin:$BOOTSTRAP:${PATH:-/usr/bin:/bin}"
-)
-
-if (( GUI )); then
-  # Deliberately shares display/audio/DBus sockets and /tmp with the desktop.
-  # This is NOT intended to isolate untrusted GUI applications.
-  args+=(--ro-bind-try /sys /sys --dev-bind-try /dev/dri /dev/dri --bind /tmp /tmp)
-  if [[ -n "${XDG_RUNTIME_DIR:-}" && -d "$XDG_RUNTIME_DIR" ]]; then
-    args+=(--bind "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR")
-  fi
-  args+=(--setenv XDG_DATA_DIRS "$PROFILE/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}")
-fi
-
-exec bwrap "${args[@]}" -- "$@"
-ENV_SCRIPT
-
-cat > "$BIN_DIR/guix-gui.sh" <<'GUI_SCRIPT'
-#!/usr/bin/env bash
-set -e
-exec "$HOME/.local/bin/guix-env.sh" --gui "$@"
-GUI_SCRIPT
-
-cat > "$BIN_DIR/guix-daemon-launch" <<'DAEMON_SCRIPT'
-#!/usr/bin/env bash
-# Fallback for desktops with no reachable systemd --user manager.
-set -e
-if "$HOME/.local/bin/guix-env.sh" guix gc --list-roots >/dev/null 2>&1; then
-  exit 0
-fi
-exec "$HOME/.local/bin/guix-env.sh" guix-daemon
-DAEMON_SCRIPT
-
-cat > "$BIN_DIR/guix-desktop-sync" <<'SYNC_SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "${GUIX_DESKTOP_SYNC_INSIDE:-}" != 1 ]]; then
-  GUIX_DESKTOP_SYNC_INSIDE=1 "$HOME/.local/bin/guix-env.sh" \
-    /bin/bash "$HOME/.local/bin/guix-desktop-sync"
-  exit 0
-fi
-
-PROFILE="$HOME/.guix-profile"
-SOURCE="$PROFILE/share/applications"
-DEST="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-ICONS="$HOME/.local/share/guix/desktop-icons"
-WRAPPER="$HOME/.local/bin/guix-gui.sh"
-mkdir -p "$DEST" "$ICONS"
-declare -A seen=()
-count=0
-
-if [[ -d "$SOURCE" ]]; then
-  while IFS= read -r -d '' desktop; do
-    rel="${desktop#"$SOURCE"/}"
-    dest="$DEST/guix-bwrap-${rel//\//-}"
-    seen["$dest"]=1
-
-    icon=$(awk '
-      /^\[Desktop Entry\]$/ { main=1; next }
-      /^\[/ { main=0 }
-      main && /^Icon=/ { sub(/^Icon=/, ""); print; exit }
-    ' "$desktop")
-    copied=''
-    if [[ -n "$icon" ]]; then
-      candidate=''
-      if [[ "$icon" == /* && -f "$icon" ]]; then
-        candidate="$icon"
-      elif [[ -d "$PROFILE/share/icons" ]]; then
-        candidate=$(find -L "$PROFILE/share/icons" -type f \
-          \( -name "$icon" -o -name "$icon.svg" -o -name "$icon.png" -o -name "$icon.xpm" \) \
-          -print -quit 2>/dev/null || true)
-      fi
-      if [[ -n "$candidate" ]]; then
-        case "$candidate" in
-          *.svg|*.png|*.xpm)
-            copied="$ICONS/${rel//\//-}.${candidate##*.}"
-            cp -L -f "$candidate" "$copied"
-            ;;
-        esac
-      fi
-    fi
-
-    # Prefix every Exec= (including Desktop Actions) and remove host-side
-    # TryExec checks. The original argument/field codes are retained.
-    awk -v wrapper="$WRAPPER" -v icon="$copied" '
-      /^\[Desktop Entry\]$/ { section="main"; print; print "X-Guix-Bwrap-Generated=true"; next }
-      /^\[/ { section="other" }
-      /^TryExec=/ { next }
-      /^Path=/ && section=="main" { next }
-      /^DBusActivatable=/ && section=="main" { print "DBusActivatable=false"; next }
-      /^Exec=/ { print "Exec=\"" wrapper "\" " substr($0,6); next }
-      /^Icon=/ && section=="main" && icon!="" { print "Icon=" icon; next }
-      { print }
-    ' "$desktop" > "$dest"
-    count=$((count+1))
-  done < <(find -L "$SOURCE" -type f -name '*.desktop' -print0)
-fi
-
-for stale in "$DEST"/guix-bwrap-*.desktop; do
-  [[ -f "$stale" ]] || continue
-  if [[ -z "${seen[$stale]+yes}" ]] && grep -qx 'X-Guix-Bwrap-Generated=true' "$stale"; then
-    rm -- "$stale"
-  fi
-done
-
-# Guix's xterm package supplies no .desktop file, so create one explicitly.
-if [[ -x "$PROFILE/bin/xterm" ]]; then
-  cat > "$DEST/guix-xterm.desktop" <<XTERM
-[Desktop Entry]
-Type=Application
-Name=XTerm (Guix)
-Comment=Terminal from GNU Guix
-Exec="$WRAPPER" xterm
-Icon=utilities-terminal
-Terminal=false
-Categories=System;TerminalEmulator;
-X-Guix-Bwrap-Generated=true
-XTERM
-elif [[ -f "$DEST/guix-xterm.desktop" ]] &&
-     grep -qx 'X-Guix-Bwrap-Generated=true' "$DEST/guix-xterm.desktop"; then
-  rm -- "$DEST/guix-xterm.desktop"
-fi
-
-echo "Synchronized $count Guix-provided desktop launcher(s)."
-SYNC_SCRIPT
-
-cat > "$BIN_DIR/guix-pkg" <<'PKG_SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-(($#)) || { echo 'Usage: guix-pkg SUBCOMMAND [ARG...]' >&2; exit 2; }
-"$HOME/.local/bin/guix-env.sh" guix "$@"
-case "$1" in
-  install|remove|upgrade) "$HOME/.local/bin/guix-desktop-sync" ;;
-esac
-PKG_SCRIPT
-
-chmod 755 "$BIN_DIR/guix-env.sh" "$BIN_DIR/guix-gui.sh" \
-  "$BIN_DIR/guix-daemon-launch" "$BIN_DIR/guix-desktop-sync" "$BIN_DIR/guix-pkg"
+install -m 755 "$SRC_DIR/bin/guix-env.sh"        "$BIN_DIR/guix-env.sh"
+install -m 755 "$SRC_DIR/bin/guix-gui.sh"        "$BIN_DIR/guix-gui.sh"
+install -m 755 "$SRC_DIR/bin/guix-daemon-launch" "$BIN_DIR/guix-daemon-launch"
+install -m 755 "$SRC_DIR/bin/guix-desktop-sync"  "$BIN_DIR/guix-desktop-sync"
+install -m 755 "$SRC_DIR/bin/guix-pkg"           "$BIN_DIR/guix-pkg"
 
 info 'Checking the Guix executable'
 "$BIN_DIR/guix-env.sh" guix --version | sed -n '1p'
 
-cat > "$XDG_CONFIG_HOME/autostart/guix-desktop-sync.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Guix Desktop Launcher Sync
-Exec="$BIN_DIR/guix-desktop-sync"
-Terminal=false
-NoDisplay=true
-EOF
+render_template "$SRC_DIR/autostart/guix-desktop-sync.desktop" \
+  "$XDG_CONFIG_HOME/autostart/guix-desktop-sync.desktop"
 
 # Only append; never replace an existing shell configuration file.
 path_line='case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH";; esac'
@@ -547,20 +407,8 @@ esac
 
 info 'Configuring daemon startup'
 mkdir -p "$XDG_CONFIG_HOME/systemd/user"
-cat > "$XDG_CONFIG_HOME/systemd/user/guix-daemon.service" <<'UNIT'
-[Unit]
-Description=Rootless GNU Guix daemon (Bubblewrap)
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/guix-env.sh guix-daemon
-Restart=on-failure
-RestartSec=3
-TasksMax=8192
-
-[Install]
-WantedBy=default.target
-UNIT
+install -m 644 "$SRC_DIR/systemd/guix-daemon.service" \
+  "$XDG_CONFIG_HOME/systemd/user/guix-daemon.service"
 
 started=0
 if command -v systemctl >/dev/null 2>&1; then
@@ -584,14 +432,8 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 if (( ! started )); then
   warn 'No usable systemd user manager; using graphical-session autostart instead.'
-  cat > "$XDG_CONFIG_HOME/autostart/guix-daemon.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Guix Daemon (Rootless)
-Exec="$BIN_DIR/guix-daemon-launch"
-Terminal=false
-NoDisplay=true
-EOF
+  render_template "$SRC_DIR/autostart/guix-daemon.desktop" \
+    "$XDG_CONFIG_HOME/autostart/guix-daemon.desktop"
   nohup "$BIN_DIR/guix-daemon-launch" > "$PREFIX/var/guix/daemon.log" 2>&1 < /dev/null &
 else
   # Remove an old fallback autostart file generated by this installer.
