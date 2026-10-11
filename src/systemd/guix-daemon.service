@@ -3,7 +3,7 @@ Description=Rootless GNU Guix daemon (Bubblewrap)
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/guix-env.sh guix-daemon
+ExecStart=%h/.local/bin/guix-env guix-daemon
 Restart=on-failure
 RestartSec=3
 TasksMax=8192

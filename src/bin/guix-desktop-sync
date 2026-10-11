@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "${GUIX_DESKTOP_SYNC_INSIDE:-}" != 1 ]]; then
-  GUIX_DESKTOP_SYNC_INSIDE=1 "$HOME/.local/bin/guix-env.sh" \
+  GUIX_DESKTOP_SYNC_INSIDE=1 "$HOME/.local/bin/guix-env" \
     /bin/bash "$HOME/.local/bin/guix-desktop-sync"
   exit 0
 fi
@@ -11,7 +11,7 @@ PROFILE="$HOME/.guix-profile"
 SOURCE="$PROFILE/share/applications"
 DEST="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 ICONS="$HOME/.local/share/guix/desktop-icons"
-WRAPPER="$HOME/.local/bin/guix-gui.sh"
+WRAPPER="$HOME/.local/bin/guix-gui"
 mkdir -p "$DEST" "$ICONS"
 declare -A seen=()
 count=0

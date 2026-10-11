@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fallback for desktops with no reachable systemd --user manager.
 set -e
-if "$HOME/.local/bin/guix-env.sh" guix gc --list-roots >/dev/null 2>&1; then
+if "$HOME/.local/bin/guix-env" guix gc --list-roots >/dev/null 2>&1; then
   exit 0
 fi
-exec "$HOME/.local/bin/guix-env.sh" guix-daemon
+exec "$HOME/.local/bin/guix-env" guix-daemon

@@ -115,7 +115,7 @@ uninstall_guix() {
   local unit="$config_home/systemd/user/guix-daemon.service"
   if [[ -e "$unit" || -L "$unit" ]]; then
     [[ -f "$unit" && ! -L "$unit" ]] || die "Unexpected systemd unit at $unit; inspect it manually."
-    if ! grep -Fq 'guix-env.sh guix-daemon' "$unit"; then
+    if ! grep -Eq 'guix-env(\.sh)? guix-daemon' "$unit"; then
       die "Systemd unit $unit does not belong to this installer. Refusing to alter it."
     fi
   fi
@@ -171,9 +171,15 @@ uninstall_guix() {
   sleep 1
   # A separate manually started daemon may lack our identifying environment.
   # If the local Guix socket still answers, bail out rather than corrupt its DB.
-  if [[ -x "$BIN_DIR/guix-env.sh" ]] && command -v timeout >/dev/null &&
+  local env_cmd=''
+  if [[ -x "$BIN_DIR/guix-env" ]]; then
+    env_cmd="$BIN_DIR/guix-env"
+  elif [[ -x "$BIN_DIR/guix-env.sh" ]]; then # pre-rename installs
+    env_cmd="$BIN_DIR/guix-env.sh"
+  fi
+  if [[ -n "$env_cmd" ]] && command -v timeout >/dev/null &&
      command -v bwrap >/dev/null && [[ -d "$PREFIX/gnu/store" ]]; then
-    if timeout 6 "$BIN_DIR/guix-env.sh" guix gc --list-roots >/dev/null 2>&1; then
+    if timeout 6 "$env_cmd" guix gc --list-roots >/dev/null 2>&1; then
       die 'The Guix daemon is still responding! Stop it first and rerun uninstall; no files were deleted.'
     fi
   fi
@@ -187,7 +193,7 @@ uninstall_guix() {
   f="$data_home/applications/guix-xterm.desktop"
   if [[ -f "$f" && ! -L "$f" ]] &&
      { grep -Fxq 'X-Guix-Bwrap-Generated=true' "$f" ||
-       grep -Fq 'guix-gui.sh xterm' "$f"; }; then
+       grep -Eq 'guix-gui(\.sh)?"? xterm' "$f"; }; then
     rm -f -- "$f"
   fi
   for f in "$config_home/autostart/guix-desktop-sync.desktop" \
@@ -206,12 +212,14 @@ uninstall_guix() {
 
   # Generated scripts are recognizable even in the earlier XDG ZIP without
   # the metadata record. Preserve unrelated scripts with coincidental names.
-  for f in "$BIN_DIR/guix-env.sh" "$BIN_DIR/guix-gui.sh" \
-           "$BIN_DIR/guix-daemon-launch" "$BIN_DIR/guix-desktop-sync" "$BIN_DIR/guix-pkg"; do
+  # Both the current names and the pre-rename '.sh' variants are removed.
+  for f in "$BIN_DIR/guix-env" "$BIN_DIR/guix-gui" \
+           "$BIN_DIR/guix-daemon-launch" "$BIN_DIR/guix-desktop-sync" "$BIN_DIR/guix-pkg" \
+           "$BIN_DIR/guix-env.sh" "$BIN_DIR/guix-gui.sh"; do
     [[ -f "$f" && ! -L "$f" ]] || continue
     case "${f##*/}" in
-      guix-env.sh)       grep -Fq 'GUIX_DAEMON_SOCKET' "$f" || continue ;;
-      guix-gui.sh)       grep -Fq 'guix-env.sh' "$f" || continue ;;
+      guix-env|guix-env.sh)   grep -Fq 'GUIX_DAEMON_SOCKET' "$f" || continue ;;
+      guix-gui|guix-gui.sh)   grep -Fq 'guix-env' "$f" || continue ;;
       guix-daemon-launch) grep -Fq 'guix-daemon' "$f" || continue ;;
       guix-desktop-sync) grep -Fq 'guix-bwrap-' "$f" || continue ;;
       guix-pkg)          grep -Fq 'guix-desktop-sync' "$f" || continue ;;
@@ -286,7 +294,7 @@ if (( UNINSTALL )); then uninstall_guix; exit 0; fi
 # the src/ tree beside this script, so they can be read and reviewed directly.
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
 SRC_DIR="$SCRIPT_DIR/src"
-for template in bin/guix-env.sh bin/guix-gui.sh bin/guix-daemon-launch \
+for template in bin/guix-env bin/guix-gui bin/guix-daemon-launch \
                 bin/guix-desktop-sync bin/guix-pkg autostart/guix-desktop-sync.desktop \
                 autostart/guix-daemon.desktop systemd/guix-daemon.service; do
   [[ -f "$SRC_DIR/$template" ]] || die "Missing src/$template beside install.sh; re-extract the full archive."
@@ -379,14 +387,14 @@ XDG_CACHE_HOME=${XDG_CACHE_HOME:-$HOME/.cache}
 EOF
 
 info 'Creating Bubblewrap command wrappers'
-install -m 755 "$SRC_DIR/bin/guix-env.sh"        "$BIN_DIR/guix-env.sh"
-install -m 755 "$SRC_DIR/bin/guix-gui.sh"        "$BIN_DIR/guix-gui.sh"
+install -m 755 "$SRC_DIR/bin/guix-env"        "$BIN_DIR/guix-env"
+install -m 755 "$SRC_DIR/bin/guix-gui"        "$BIN_DIR/guix-gui"
 install -m 755 "$SRC_DIR/bin/guix-daemon-launch" "$BIN_DIR/guix-daemon-launch"
 install -m 755 "$SRC_DIR/bin/guix-desktop-sync"  "$BIN_DIR/guix-desktop-sync"
 install -m 755 "$SRC_DIR/bin/guix-pkg"           "$BIN_DIR/guix-pkg"
 
 info 'Checking the Guix executable'
-"$BIN_DIR/guix-env.sh" guix --version | sed -n '1p'
+"$BIN_DIR/guix-env" guix --version | sed -n '1p'
 
 render_template "$SRC_DIR/autostart/guix-desktop-sync.desktop" \
   "$XDG_CONFIG_HOME/autostart/guix-desktop-sync.desktop"
@@ -446,7 +454,7 @@ fi
 info 'Waiting for Guix daemon socket'
 ready=0
 for ((i=0; i<20; i++)); do
-  if "$BIN_DIR/guix-env.sh" guix gc --list-roots >/dev/null 2>&1; then
+  if "$BIN_DIR/guix-env" guix gc --list-roots >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -456,7 +464,7 @@ if (( ! ready )); then
   die "Daemon did not respond. Inspect: journalctl --user -u guix-daemon.service -n 50; or $PREFIX/var/guix/daemon.log"
 fi
 info 'Authorizing official Guix substitute-server signing keys'
-"$BIN_DIR/guix-env.sh" /bin/bash -c '
+"$BIN_DIR/guix-env" /bin/bash -c '
   set -e
   keydir=/var/guix/profiles/per-user/root/current-guix/share/guix
   for name in ci.guix.gnu.org bordeaux.guix.gnu.org; do
@@ -468,13 +476,13 @@ info 'Authorizing official Guix substitute-server signing keys'
 
 if (( ! NO_EXAMPLES )); then
   info 'Installing hello and xterm (may download GUI dependencies)'
-  "$BIN_DIR/guix-env.sh" guix install hello xterm
+  "$BIN_DIR/guix-env" guix install hello xterm
   info 'Verifying hello'
-  "$BIN_DIR/guix-env.sh" "$HOME/.guix-profile/bin/hello"
+  "$BIN_DIR/guix-env" "$HOME/.guix-profile/bin/hello"
 fi
 if (( WITH_GEANY )); then
   info 'Installing Geany (potentially hundreds of megabytes of GTK dependencies)'
-  "$BIN_DIR/guix-env.sh" guix install geany
+  "$BIN_DIR/guix-env" guix install geany
 fi
 
 info 'Synchronizing XDG desktop entries'
@@ -483,14 +491,14 @@ info 'Synchronizing XDG desktop entries'
 info 'INSTALLATION COMPLETE'
 cat <<EOF
 Guix data:       $PREFIX
-Wrapper:         $BIN_DIR/guix-env.sh
-GUI wrapper:     $BIN_DIR/guix-gui.sh
+Wrapper:         $BIN_DIR/guix-env
+GUI wrapper:     $BIN_DIR/guix-gui
 Package helper:  $BIN_DIR/guix-pkg
 
 Current shell:   export PATH="\$HOME/.local/bin:\$PATH"
-Guix version:    guix-env.sh guix --version
+Guix version:    guix-env guix --version
 Install package: guix-pkg install geany
-GUI test:        guix-gui.sh xterm      (from your graphical desktop)
+GUI test:        guix-gui xterm      (from your graphical desktop)
 Resync launchers: guix-desktop-sync
 
 The daemon starts through systemd --user if available, otherwise XDG

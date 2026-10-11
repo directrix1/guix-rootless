@@ -5,7 +5,7 @@ PROFILE="$HOME/.guix-profile"
 BOOTSTRAP=/var/guix/profiles/per-user/root/current-guix/bin
 GUI=0
 if [[ "${1:-}" == --gui ]]; then GUI=1; shift; fi
-(($#)) || { echo 'Usage: guix-env.sh [--gui] COMMAND [ARG...]' >&2; exit 2; }
+(($#)) || { echo 'Usage: guix-env [--gui] COMMAND [ARG...]' >&2; exit 2; }
 
 args=(
   --share-net

@@ -99,8 +99,8 @@ Everything the installer generates comes from plain, reviewable files in the rep
 ```text
 src/
 ├── bin/                             # copied as-is into ~/.local/bin (mode 755)
-│   ├── guix-env.sh                  # Bubblewrap namespace wrapper
-│   ├── guix-gui.sh                  # GUI wrapper sharing the desktop session
+│   ├── guix-env                     # Bubblewrap namespace wrapper
+│   ├── guix-gui                     # GUI wrapper sharing the desktop session
 │   ├── guix-daemon-launch           # daemon fallback without user systemd
 │   ├── guix-desktop-sync            # XDG launcher synchronization
 │   └── guix-pkg                     # package helper + launcher resync
@@ -127,8 +127,8 @@ Generated helpers:
 
 | Command | Purpose |
 |---|---|
-| `guix-env.sh COMMAND ...` | Run a command inside the Guix Bubblewrap mount namespace |
-| `guix-gui.sh COMMAND ...` | Run a GUI command with the active Wayland/X11/audio/GPU session mounted |
+| `guix-env COMMAND ...` | Run a command inside the Guix Bubblewrap mount namespace |
+| `guix-gui COMMAND ...` | Run a GUI command with the active Wayland/X11/audio/GPU session mounted |
 | `guix-pkg install PACKAGE` | Run the Guix package command and resync desktop entries |
 | `guix-desktop-sync` | Create/update XDG desktop launchers from Guix profile `.desktop` files |
 | `guix-daemon-launch` | Fallback start command when user systemd is unavailable |
@@ -145,27 +145,27 @@ The Guix user profile is normally `~/.guix-profile`, a symlink to Guix-managed p
 
 ## Desktop compatibility
 
-The application launchers use the freedesktop.org Desktop Entry Specification, and the login hooks use the XDG Autostart Specification. No `OnlyShowIn=KDE;` restrictions are present. A desktop or menu implementation that follows those standards (for example, KDE Plasma, GNOME, Xfce, Cinnamon, MATE, or LXQt) can discover the entries. If the session does not implement those standards, you can still launch programs from a terminal with `guix-gui.sh` and start the daemon manually or via another init system.
+The application launchers use the freedesktop.org Desktop Entry Specification, and the login hooks use the XDG Autostart Specification. No `OnlyShowIn=KDE;` restrictions are present. A desktop or menu implementation that follows those standards (for example, KDE Plasma, GNOME, Xfce, Cinnamon, MATE, or LXQt) can discover the entries. If the session does not implement those standards, you can still launch programs from a terminal with `guix-gui` and start the daemon manually or via another init system.
 
 There is no universal XDG command to force a menu refresh. `guix-desktop-sync` creates, updates, and removes standard `.desktop` entries in the XDG applications directory, leaving menu discovery and caching to the desktop environment. `update-desktop-database` only updates MIME associations, not application menus. If an entry does not appear immediately, the desktop may require its menu to be reopened or the session to be restarted. Each GUI application is launched using the active display session's environment, and individual toolkits may need extra portal or device configuration.
 
 ## Everyday usage
 
 ```bash
-guix-env.sh guix --version
+guix-env guix --version
 guix-pkg install geany
 guix-pkg upgrade
 guix-pkg remove geany
 guix-desktop-sync
-guix-gui.sh xterm
-guix-gui.sh geany
+guix-gui xterm
+guix-gui geany
 ```
 
-Graphical applications started through `guix-gui.sh` inherit the **currently active desktop session**. Launch GUI apps from your intended graphical session, not an unrelated outer/VR session, so that the correct `XDG_RUNTIME_DIR`, display and D-Bus details are inherited.
+Graphical applications started through `guix-gui` inherit the **currently active desktop session**. Launch GUI apps from your intended graphical session, not an unrelated outer/VR session, so that the correct `XDG_RUNTIME_DIR`, display and D-Bus details are inherited.
 
-XDG application entries are copied from `~/.guix-profile/share/applications` and their `Exec=` values are prefixed with `guix-gui.sh`. Simple standard desktop entries are supported, including basic icons and desktop actions; complex D-Bus-activated apps, portals, desktop-file quoting edge cases, or applications needing additional host devices may need manual changes. A message saying *“Synchronized 0 Guix-provided desktop launcher(s)”* is normal until you install a package providing a `.desktop` file. `xterm` gets a special launcher regardless.
+XDG application entries are copied from `~/.guix-profile/share/applications` and their `Exec=` values are prefixed with `guix-gui`. Simple standard desktop entries are supported, including basic icons and desktop actions; complex D-Bus-activated apps, portals, desktop-file quoting edge cases, or applications needing additional host devices may need manual changes. A message saying *“Synchronized 0 Guix-provided desktop launcher(s)”* is normal until you install a package providing a `.desktop` file. `xterm` gets a special launcher regardless.
 
-`guix-pkg` synchronizes entries after `install`, `remove`, and `upgrade`. If you execute a package command directly with `guix-env.sh guix ...`, run `guix-desktop-sync` afterward.
+`guix-pkg` synchronizes entries after `install`, `remove`, and `upgrade`. If you execute a package command directly with `guix-env guix ...`, run `guix-desktop-sync` afterward.
 
 ## Steam Frame: user systemd bus
 
@@ -183,7 +183,7 @@ systemctl --user status guix-daemon.service --no-pager
 If neither bus is accessible, the installer creates an XDG autostart entry. On compliant desktops, the daemon then starts at graphical login instead of through systemd. On a headless system or a session that does not implement XDG autostart, start the daemon yourself, for example:
 
 ```bash
-~/.local/bin/guix-env.sh guix-daemon
+~/.local/bin/guix-env guix-daemon
 ```
 
 Keep that terminal open while installing packages. Do **not** run two copies of `guix-daemon` against the same store/state directory.
@@ -197,17 +197,17 @@ Keep that terminal open while installing packages. Do **not** run two copies of 
 **Guix cannot connect to its daemon** — Check:
 
 ```bash
-guix-env.sh guix gc --list-roots
+guix-env guix gc --list-roots
 journalctl --user -u guix-daemon.service -n 50 --no-pager
 cat ~/.local/share/guix/var/guix/daemon.log   # XDG autostart fallback only
 ```
 
-**DNS failures** — This setup mounts host `/etc` and `/run` read-only inside Bubblewrap because `/etc/resolv.conf` may refer to a file under `/run`. Verify name resolution on the host, then compare with `guix-env.sh getent hosts ci.guix.gnu.org` if `getent` is installed.
+**DNS failures** — This setup mounts host `/etc` and `/run` read-only inside Bubblewrap because `/etc/resolv.conf` may refer to a file under `/run`. Verify name resolution on the host, then compare with `guix-env getent hosts ci.guix.gnu.org` if `getent` is installed.
 
 **“ACL for archive imports seems to be uninitialized”** — Signing keys were not authorized. If the daemon is running, retry:
 
 ```bash
-guix-env.sh /bin/bash -c '
+guix-env /bin/bash -c '
   set -e
   d=/var/guix/profiles/per-user/root/current-guix/share/guix
   for s in ci.guix.gnu.org bordeaux.guix.gnu.org; do
@@ -218,7 +218,7 @@ guix-env.sh /bin/bash -c '
 
 **Everything will be built from source** — Check DNS, the ACL, and actual substitute availability for your architecture. The installer trusts only the official Guix signing keys bundled with the downloaded archive.
 
-**GUI app does not open** — Try `guix-gui.sh app-name` from a terminal in your graphical desktop session. Some graphics/audio/DBus applications require app-specific adjustments. Being able to run XTerm does not guarantee every GUI application will work.
+**GUI app does not open** — Try `guix-gui app-name` from a terminal in your graphical desktop session. Some graphics/audio/DBus applications require app-specific adjustments. Being able to run XTerm does not guarantee every GUI application will work.
 
 ## Security and design notes
 
